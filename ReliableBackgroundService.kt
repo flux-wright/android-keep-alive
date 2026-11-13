@@ -8,6 +8,10 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 
+/**
+* 闹钟驱动的前台服务：被 AlarmManager 唤醒后执行一轮任务即退出，不常驻、不自启。
+* 唤醒链见 AlarmScheduler + AlarmWakeUpReceiver。
+*/
 class ReliableBackgroundService: Service() {
 
 private val serviceJob = SupervisorJob()
@@ -51,27 +55,22 @@ startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TY
 startForeground(NOTIFICATION_ID, notification)
 }
 
-// 启动你的持续性后台任务（例如网络长连接心跳、转码队列等）
-startPersistentTask()
+// 执行一轮任务，做完即退
+runOneShotTask()
 
-// START_STICKY：若系统因内存极度紧张杀掉服务，待资源恢复后尝试重建服务
-return START_STICKY
+// 闹钟驱动模型：服务被杀不靠系统粘性重建——重建由下一次闹钟负责，因此返回 START_NOT_STICKY
+return START_NOT_STICKY
 }
 
-private fun startPersistentTask() {
+private fun runOneShotTask() {
 serviceScope.launch {
-while (isActive) {
 try {
-// WakeLock 只有 1 小时超时，心跳却是无限循环：锁过期后 CPU 可能休眠、心跳会漂移，
-// 因此每轮先检查，锁已释放就重新 acquire，保证长时间运行不中断。
-renewWakeLockIfNeeded()
-// TODO: 在此处执行你的核心后台逻辑（如心跳维持、本地队列处理）
-delay(15_000L) // 示例：每 15 秒执行一次
-} catch (e: CancellationException) {
-break
+// TODO: 在此处执行一轮核心任务（数据同步、本地队列处理、心跳上报）
+// 本模型不常驻：一轮任务做完即退出，等待下一次闹钟唤醒——间歇期零占用、零电耗。
 } catch (e: Exception) {
 e.printStackTrace()
-}
+} finally {
+stopSelf()
 }
 }
 }
@@ -91,7 +90,7 @@ stopSelf(startId)
 */
 override fun onTimeout(startId: Int, fgsType: Int) {
 super.onTimeout(startId, fgsType)
-// 可在此处记录状态，或切换至 WorkManager 延迟调度接管任务
+// 可在此处记录状态，等待下一轮闹钟唤醒时继续处理
 stopSelf(startId)
 }
 
@@ -101,20 +100,8 @@ wakeLock = powerManager.newWakeLock(
 PowerManager.PARTIAL_WAKE_LOCK,
 "MyApp::BackgroundTaskWakeLock"
 ).apply {
-// 设置最大超时时间防止意外耗电，按需续期
+// 一轮任务通常以分钟计，1 小时是防任务跑飞的上限保护
 acquire(60 * 60 * 1000L)
-}
-}
-
-/**
-* 续锁：WakeLock 超时自动释放后（isHeld == false），重新 acquire。
-* 由心跳循环每轮调用，保证无限循环的后台任务不会在第 61 分钟失去唤醒锁。
-*/
-private fun renewWakeLockIfNeeded() {
-wakeLock?.let {
-if (!it.isHeld) {
-it.acquire(60 * 60 * 1000L)
-}
 }
 }
 
