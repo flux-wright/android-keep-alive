@@ -1,22 +1,53 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.backgroundservice">
+package="com.example.alarmkeepalive">
 
-    <!-- 基础前台服务权限 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Android 14/15+ 必须声明对应的具体类型权限 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
-    <!-- Android 13+ 发送通知权限（前台服务必须挂通知） -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- 申请加入电池优化白名单（可选，视业务需求引导用户开启） -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+<!-- 精确闹钟权限（穿透 Doze 休眠核心） -->
+<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+<!-- 若应用具备时钟/日程/提醒核心属性，可声明此权限免去用户手动授权（Google Play 审核需符合品类） -->
+<uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <application ...>
-        <!-- 声明后台执行服务，指定具体的 foregroundServiceType -->
-        <service
-            android:name=".ReliableBackgroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync|mediaProcessing" />
-    </application>
+<!-- 唤醒锁权限（保证唤醒窗口期 CPU 不二次休眠） -->
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+
+<!-- 开机自启权限（手机重启后系统会清空所有 AlarmManager 任务，必须靠此广播重新挂载闹钟链） -->
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+<!-- 若唤醒后需执行超过 10 秒的耗时业务，需挂载前台服务兜底 -->
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+<application ...>
+
+<!-- 核心闹钟唤醒接收器 -->
+<receiver
+android:name=".AlarmKeepAliveReceiver"
+android:enabled="true"
+android:exported="false">
+<intent-filter>
+<action android:name="com.example.ACTION_ALARM_WAKEUP" />
+<!-- 监听系统时间/时区变更，防止闹钟链断裂 -->
+<action android:name="android.intent.action.TIME_SET" />
+<action android:name="android.intent.action.TIMEZONE_CHANGED" />
+</intent-filter>
+</receiver>
+
+<!-- 开机重建闹钟链接收器 -->
+<receiver
+android:name=".BootRestoreReceiver"
+android:enabled="true"
+android:exported="true">
+<intent-filter>
+<action android:name="android.intent.action.BOOT_COMPLETED" />
+<action android:name="android.intent.action.QUICKBOOT_POWERON" />
+</intent-filter>
+</receiver>
+
+<!-- 唤醒后的短时任务执行服务（按需使用） -->
+<service
+android:name=".WakeUpWorkerService"
+android:enabled="true"
+android:exported="false"
+android:foregroundServiceType="dataSync" />
+
+</application>
 </manifest>
